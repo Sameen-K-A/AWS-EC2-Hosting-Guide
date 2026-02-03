@@ -1,212 +1,474 @@
+# 🚀 TypeScript Backend - AWS EC2 Deployment Guide
+
+> Complete step-by-step guide to deploy a TypeScript Node.js backend to AWS EC2 with Redis, Nginx, SSL, and PM2.
+
 ---
 
-# AWS-EC2-Hosting-Guide
+## 📋 Pre-Deployment Checklist
 
-This repository provides a step-by-step guide to deploying and hosting backend applications on AWS EC2 using the t2.micro Free Tier. It covers setting up an instance, configuring security groups, SSH access, and deploying an Express.js app, along with tips for managing and securing your EC2 instance.
+Before starting, make sure you have:
 
-## Step 01
+- [ ] AWS IAM credentials with EC2 access
+- [ ] MongoDB Atlas production database ready
+- [ ] All production credentials (Firebase, payment gateway, etc.)
+- [ ] Code pushed to GitHub `main` branch
+- [ ] `npm run build` works locally without errors
+- [ ] Domain name purchased and accessible
 
-Launch a new EC2 instance using the t2.micro Free Tier.
-Choose the Ubuntu Server as your AMI (Amazon Machine Image).
-Download and securely store the .pem file for SSH access.
+---
 
-- Open your instance -> Connect -> SSH Client
-- Connect to your instance using its Public DNS. Copy the command (e.g., `ec2-0-000-000-00.ap-southeast-2.compute.amazonaws.com`).
+## 📝 Replace These Placeholders
 
-## Step 02
+Throughout this guide, replace these with your actual values:
 
-Connect to your instance using the Public DNS through the command prompt.
+| Placeholder | Example | Your Value |
+|-------------|---------|------------|
+| `YOUR_PROJECT_NAME` | loopcall-backend | ___________ |
+| `YOUR_DOMAIN` | api.example.com | ___________ |
+| `YOUR_PUBLIC_IP` | 13.235.xxx.xxx | ___________ |
+| `YOUR_GITHUB_URL` | https://github.com/user/repo.git | ___________ |
+| `YOUR_PORT` | 8000 | ___________ |
 
-- Open the directory where your `.pem` file is located through cmd. (e.g., `cd Downloads`)
-- Use the SSH command provided by AWS to connect.
+---
 
-## Step 03
+## Part 1: Create EC2 Instance
 
-Update all dependencies and packages for your virtual machine.
+### Step 1.1: Login to AWS Console
+
+1. Go to [AWS Console](https://console.aws.amazon.com/)
+2. Login with your IAM credentials
+3. Select your preferred region (e.g., Mumbai `ap-south-1`)
+
+### Step 1.2: Launch EC2 Instance
+
+1. Go to **EC2 Dashboard** → Click **Launch Instance**
+
+2. **Name your instance:**
+   ```
+   YOUR_PROJECT_NAME
+   ```
+
+3. **Choose AMI (Amazon Machine Image):**
+   - Select **Ubuntu Server 22.04 LTS (HVM), SSD Volume Type**
+   - Architecture: **64-bit (x86)**
+
+4. **Choose Instance Type:**
+   - Select **t2.micro** (Free Tier) or **t2.small** for more traffic
+
+5. **Create Key Pair:**
+   - Click **Create new key pair**
+   - Name: `YOUR_PROJECT_NAME-key`
+   - Type: **RSA**
+   - Format: **.pem**
+   - Click **Create key pair** - **⚠️ SAVE THIS FILE SECURELY!**
+
+6. **Network Settings:**
+   - Click **Edit**
+   - Keep default VPC
+   - **Auto-assign public IP:** Enable
+   - **Create security group** with name: `YOUR_PROJECT_NAME-sg`
+
+7. **Configure Security Group Rules:**
+
+   | Type | Port Range | Source | Description |
+   |------|------------|--------|-------------|
+   | SSH | 22 | My IP | SSH access |
+   | HTTP | 80 | 0.0.0.0/0, ::/0 | Web traffic |
+   | HTTPS | 443 | 0.0.0.0/0, ::/0 | Secure web traffic |
+   | Custom TCP | YOUR_PORT | 0.0.0.0/0, ::/0 | Node.js app (temporary) |
+
+8. **Configure Storage:**
+   - Keep default **8 GB** or increase to **20 GB** if needed
+
+9. Click **Launch Instance**
+
+### Step 1.3: Wait for Instance to Start
+
+1. Go to **EC2 Dashboard** → **Instances**
+2. Wait until **Instance State** shows **Running** (green)
+3. Wait until **Status checks** shows **2/2 checks passed**
+4. **Copy the Public IPv4 address** - you'll need this!
+
+---
+
+## Part 2: Connect to EC2 via SSH
+
+### Step 2.1: Open PowerShell
+
+1. Open **PowerShell** (search in Start menu)
+2. Navigate to folder where `.pem` file is saved:
+   ```bash
+   cd Downloads
+   ```
+
+### Step 2.2: Connect via SSH
 
 ```bash
-sudo apt update
-sudo apt upgrade -y
+ssh -i "YOUR_PROJECT_NAME-key.pem" ubuntu@YOUR_PUBLIC_IP
 ```
 
-## Step 04
+**First time connecting?** Type `yes` when asked about fingerprint.
 
-Install necessary dependencies: Node.js, npm, and Git.
+✅ You should now see: `ubuntu@ip-xxx-xxx-xxx-xxx:~$`
+
+---
+
+## Part 3: Install Required Software
+
+### Step 3.1: Update System Packages
 
 ```bash
-sudo apt install nodejs npm git -y
+sudo apt update && sudo apt upgrade -y
 ```
 
-Add the Node.js 18.x repository and install it:
+### Step 3.2: Install Node.js 20.x
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
-Check the versions of the installed dependencies to ensure everything is installed correctly:
+Verify installation:
+```bash
+node -v    # Should show v20.x.x
+npm -v     # Should show 10.x.x
+```
+
+### Step 3.3: Install Git
 
 ```bash
-node -v
-npm -v
-git -v
+sudo apt install git -y
+git --version
 ```
 
-## Step 05
-
-Clone your GitHub repository to the virtual machine, navigate to the correct directory, and install dependencies (Because `node_modules` is not pushed to GitHub).
+### Step 3.4: Install Redis (if your project uses Redis)
 
 ```bash
-git clone https://github.com/Sameen-K-A/Instant-Fix.git
-cd Instant-Fix
-npm install
+sudo apt install redis-server -y
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
 ```
 
-Ensure that `node_modules` is installed successfully.
-
-## Step 06
-
-Set up your environment variables in the virtual machine.
-
+Verify Redis:
 ```bash
-nano .env
+redis-cli ping    # Should return: PONG
 ```
 
-Enter or copy-paste all your environment credentials into the file, then save.
-
-- Press **Ctrl + X**
-- Press **Y** to confirm
-- Press **Enter**
-
-Ensure your `.env` file is saved successfully:
-
-```bash
-cat .env
-```
-
-## Step 07
-
-Edit your **AWS Inbound Rules**:
-
-- Go to the instance **Security** tab -> Click on **Security Groups** -> **Edit Inbound Rules**
-- Add a rule: (Type: Custom TCP Rule, Port Range: your_portNumber, Source: 0.0.0.0/0) 
-- Add another rule: (Type: Custom TCP Rule, Port Range: your_portNumber, Source: ::/0)
-- Save the rules
-
-## Step 08
-
-Install PM2 to ensure your application keeps running even if there's a crash or your shell disconnects.
+### Step 3.5: Install PM2 (Process Manager)
 
 ```bash
 sudo npm install -g pm2
 pm2 --version
 ```
 
-Start your application:
+### Step 3.6: Install Nginx (Web Server)
 
 ```bash
-pm2 start app.js
+sudo apt install nginx -y
+sudo systemctl enable nginx
+sudo systemctl start nginx
 ```
 
-Other PM2 commands:
+Verify Nginx:
+```bash
+sudo systemctl status nginx    # Should show: active (running)
+```
 
-- Check app status: `pm2 status`
-- Restart the app: `pm2 restart app`
-- Stop the app: `pm2 stop app`
-- View logs: `pm2 logs`
+---
 
-Check if your application is running by visiting:
+## Part 4: Clone and Setup Application
+
+### Step 4.1: Generate GitHub Token (for private repos)
+
+1. Go to: **https://github.com/settings/tokens**
+2. Click **Generate new token (classic)**
+3. Name: `EC2-YOUR_PROJECT_NAME`
+4. Expiration: **No expiration**
+5. Check: ✅ `repo`
+6. Click **Generate token** and **COPY IT!**
+
+### Step 4.2: Clone Repository
 
 ```bash
-http://Your_instance_publicIP:port_number
+cd ~
+git clone https://YOUR_TOKEN@github.com/USERNAME/REPO_NAME.git
+cd REPO_NAME
 ```
 
-(e.g., `http://x.xxx.xxx.xx:3000`)
-
-Now your application running successfully 
-
-![](https://i.pinimg.com/originals/73/cc/a4/73cca45a93f91944b2c9fdd4b05c3c53.gif)
-
-## Step 09
-
-Purchase a free or paid domain name (GoDaddy, Hostinger, etc.).
-
-Manage your domain DNS and add 2 **A Records**:
-
-- `{Name: @, Target: Your public IP, TTL: 30 min}`
-- `{Name: www, Target: Your public IP, TTL: 30 min}`
-
-## Step 10
-
-Install and configure NGINX:
+### Step 4.3: Install Dependencies
 
 ```bash
-sudo apt install nginx
+npm install
 ```
 
-Navigate back to the root directory and list the files:
+### Step 4.4: Create Environment File
 
 ```bash
-cd ..
-ls
+nano .env
 ```
 
-Open and edit the NGINX configuration:
+Paste your production environment variables, then save:
+- Press `Ctrl + X`
+- Press `Y`
+- Press `Enter`
+
+Verify `.env` file:
+```bash
+cat .env
+```
+
+### Step 4.5: Build TypeScript
+
+```bash
+npm run build
+```
+
+Verify build:
+```bash
+ls dist/    # Should show server.js and other files
+```
+
+---
+
+## Part 5: Start Application with PM2
+
+### Step 5.1: Start the Application
+
+```bash
+pm2 start dist/server.js --name "YOUR_PROJECT_NAME"
+```
+
+### Step 5.2: Verify Application is Running
+
+```bash
+pm2 status
+```
+
+### Step 5.3: Check Logs
+
+```bash
+pm2 logs YOUR_PROJECT_NAME
+```
+
+### Step 5.4: Configure PM2 to Auto-Start on Reboot
+
+```bash
+pm2 startup
+```
+
+Copy and run the command it shows, then:
+```bash
+pm2 save
+```
+
+### Step 5.5: Test Application
+
+```bash
+curl http://localhost:YOUR_PORT/health
+```
+
+---
+
+## Part 6: Configure Nginx as Reverse Proxy
+
+### Step 6.1: Edit Nginx Configuration
 
 ```bash
 sudo nano /etc/nginx/sites-available/default
 ```
 
-Set up your server name and location:
+**Delete everything** and paste this:
 
 ```nginx
-server_name yourdomainname.com www.yourdomainname.com;
+server {
+    listen 80;
+    listen [::]:80;
+    server_name YOUR_DOMAIN;
 
-location / {
-    proxy_pass http://localhost:your_portNumber;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
-    proxy_set_header Host $host;
-    proxy_cache_bypass $http_upgrade;
+    location / {
+        proxy_pass http://localhost:YOUR_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # WebSocket support for Socket.IO
+        proxy_read_timeout 86400;
+    }
 }
 ```
 
-Test and restart NGINX:
+Save and exit.
+
+### Step 6.2: Test Nginx Configuration
 
 ```bash
 sudo nginx -t
-sudo nginx -s reload
 ```
 
-Make sure your NGINX setup is successful. Open a new tab in your browser, and enter your instance's public IP.
-
-## Step 11
-
-Add an SSL certificate for HTTPS secure communication between the client and server. SSL is applied using Certbot.
+### Step 6.3: Restart Nginx
 
 ```bash
-sudo add-apt-repository ppa:certbot/certbot
-sudo apt-get update
-sudo apt-get install python3-certbot-nginx
+sudo systemctl restart nginx
 ```
 
-Run Certbot to set up the SSL certificate:
+### Step 6.4: Test via Public IP
+
+Open browser: `http://YOUR_PUBLIC_IP/health`
+
+---
+
+## Part 7: Configure Domain DNS
+
+### Step 7.1: Get Your EC2 Public IP
 
 ```bash
-sudo certbot --nginx -d domainname.com -d www.domainname.com
+curl ifconfig.me
 ```
 
-Certbot SSL certificates expire after 90 days. To ensure it auto-renews
+### Step 7.2: Add DNS Records
+
+In your domain registrar, add:
+
+| Type | Name | Value | TTL |
+|------|------|-------|-----|
+| A | api | YOUR_PUBLIC_IP | 300 |
+
+For root domain and www:
+| Type | Name | Value | TTL |
+|------|------|-------|-----|
+| A | @ | YOUR_PUBLIC_IP | 300 |
+| A | www | YOUR_PUBLIC_IP | 300 |
+
+### Step 7.3: Test DNS
+
+Wait 5-30 minutes, then:
+```bash
+curl http://YOUR_DOMAIN/health
+```
+
+---
+
+## Part 8: Install SSL Certificate (HTTPS)
+
+### Step 8.1: Install Certbot
+
+```bash
+sudo apt install certbot python3-certbot-nginx -y
+```
+
+### Step 8.2: Get SSL Certificate
+
+```bash
+sudo certbot --nginx -d YOUR_DOMAIN
+```
+
+**When prompted:**
+1. Enter email address
+2. Agree to terms: `Y`
+3. Share email with EFF: `N`
+4. Redirect HTTP to HTTPS: `2`
+
+### Step 8.3: Verify SSL Auto-Renewal
 
 ```bash
 sudo certbot renew --dry-run
 ```
+
+### Step 8.4: Test HTTPS
+
+Open browser: `https://YOUR_DOMAIN/health`
+
 ---
 
-# Conclusion
+## Part 9: MongoDB Atlas - Whitelist EC2 IP
 
-Thank you for following this guide on hosting a Node.js application on AWS EC2. I hope it has helped you deploy your application smoothly and understand the basic configurations required. If you encounter any issues or have any suggestions for improvement, feel free to raise an issue or contact me.
+1. Go to [MongoDB Atlas](https://cloud.mongodb.com/)
+2. Go to your cluster → **Network Access**
+3. Click **Add IP Address**
+4. Add: `YOUR_PUBLIC_IP/32`
+5. Description: `EC2 Production Server`
 
-If you found this helpful, don't forget to give the repository a ⭐ on GitHub!
+---
 
-Happy coding!
+## 📋 Useful PM2 Commands
+
+| Command | Description |
+|---------|-------------|
+| `pm2 status` | Check application status |
+| `pm2 logs YOUR_PROJECT_NAME` | View real-time logs |
+| `pm2 logs YOUR_PROJECT_NAME --lines 100` | View last 100 logs |
+| `pm2 restart YOUR_PROJECT_NAME` | Restart application |
+| `pm2 stop YOUR_PROJECT_NAME` | Stop application |
+| `pm2 delete YOUR_PROJECT_NAME` | Remove from PM2 |
+| `pm2 monit` | Real-time monitoring |
+
+---
+
+## 🔄 How to Deploy Updates
+
+```bash
+cd ~/REPO_NAME
+git pull origin main
+npm install
+npm run build
+pm2 restart YOUR_PROJECT_NAME
+```
+
+---
+
+## ⚠️ Troubleshooting
+
+### Application not starting?
+```bash
+pm2 logs YOUR_PROJECT_NAME --lines 50
+```
+
+### Nginx errors?
+```bash
+sudo nginx -t
+sudo tail -f /var/log/nginx/error.log
+```
+
+### Redis not working?
+```bash
+sudo systemctl status redis-server
+redis-cli ping
+```
+
+### MongoDB connection failed?
+- Check if EC2 IP is whitelisted in MongoDB Atlas
+- Verify connection string in `.env`
+
+### Port already in use?
+```bash
+sudo lsof -i :YOUR_PORT
+pm2 delete all
+pm2 start dist/server.js --name "YOUR_PROJECT_NAME"
+```
+
+### Certbot "already running" error?
+```bash
+sudo pkill certbot
+sudo certbot --nginx -d YOUR_DOMAIN
+```
+
+---
+
+## ✅ Deployment Complete!
+
+Your backend is now:
+- ✅ Running on EC2 with PM2
+- ✅ Behind Nginx reverse proxy
+- ✅ Secured with SSL (HTTPS)
+- ✅ Auto-restarts on crash/reboot
+
+---
+
+## 👤 Author
+
+**Sameen K A** - CTO at Veevity Technologies
